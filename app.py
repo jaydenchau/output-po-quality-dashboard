@@ -254,10 +254,10 @@ st.markdown("---")
 # ════════════════════════════════════════════
 st.markdown("### 📌 快速导航")
 
-nav_col1, nav_col2, nav_col3 = st.columns(3)
-with nav_col1:
-    st.page_link("app.py", label="🏠 总览仪表板", icon="📊", disabled=True)
-with nav_col2:
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.info("📊 **总览仪表板**（当前页面）")
+with col2:
     st.page_link("pages/1_Consistency_Checks.py", label="📋 一致性检查", icon="✅")
-with nav_col3:
+with col3:
     st.page_link("pages/2_TQC3_vs_WIP8.py", label="📊 TQC3 vs WIP8 对比", icon="📈")

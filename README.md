@@ -83,3 +83,39 @@ waytobox/
 ├── requirements.txt
 └── README.md
 ```
+
+
+## 部署到 Streamlit Community Cloud
+
+代码仓库：https://github.com/jaydenchau/output-po-quality-dashboard
+
+### 部署步骤
+
+**第 1 步**：打开 https://streamlit.io/cloud，用 GitHub 账号登录
+
+**第 2 步**：点击 **"New app"** 按钮
+
+**第 3 步**：填写以下信息：
+
+| 项目 | 填写内容 |
+|------|---------|
+| Repository | `jaydenchau/output-po-quality-dashboard` |
+| Branch | `main` |
+| Main file path | `app.py` |
+
+**第 4 步**：点击 **"Deploy"** 按钮
+
+等待 2-3 分钟，部署完成后会生成链接，例如：
+```
+https://output-po-quality-dashboard.streamlit.app
+```
+
+### 后续更新代码
+
+```bash
+git add .
+git commit -m "修改说明"
+git push
+```
+
+Streamlit Cloud 会自动检测更新并重新部署。
