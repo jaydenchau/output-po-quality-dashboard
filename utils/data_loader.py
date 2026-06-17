@@ -97,10 +97,14 @@ def build_sidebar() -> pd.DataFrame:
     侧边栏：工厂筛选 → 日期范围 → 数据管理 → 数据概况
     返回筛选后的 DataFrame。
     """
-    # ── 加载数据（仅首次或上传后读取） ──
-    df = load_data()
-    if df.empty:
-        st.error("无法加载数据")
+    try:
+        # ── 加载数据（仅首次或上传后读取） ──
+        df = load_data()
+        if df.empty:
+            st.error("无法加载数据，请检查 CSV 文件")
+            st.stop()
+    except Exception as e:
+        st.error(f"数据加载失败: {e}")
         st.stop()
 
     # ── 1) 工厂筛选 ──
