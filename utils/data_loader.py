@@ -63,6 +63,7 @@ def load_data() -> pd.DataFrame:
     if ("df_raw" in st.session_state
             and "df_path" in st.session_state
             and st.session_state["df_path"] == current_path):
+        st.session_state["df_version"] = st.session_state.get("df_version", 0)
         return st.session_state["df_raw"]
 
     # 需要重新读取
@@ -77,6 +78,7 @@ def load_data() -> pd.DataFrame:
 
     st.session_state["df_raw"] = df
     st.session_state["df_path"] = current_path
+    st.session_state["df_version"] = st.session_state.get("df_version", 0) + 1
     return df
 
 
@@ -145,9 +147,9 @@ def build_sidebar() -> pd.DataFrame:
     if uploaded_file is not None:
         with st.spinner("正在保存并加载数据..."):
             save_uploaded_file(uploaded_file)
-            # 清除 session_state 中缓存的路径，下次 rerun 会重新读取
             if "df_path" in st.session_state:
                 del st.session_state["df_path"]
+            st.cache_data.clear()
             st.rerun()
 
     if data_src == "uploaded":

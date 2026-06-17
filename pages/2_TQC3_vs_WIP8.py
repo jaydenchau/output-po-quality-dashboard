@@ -12,10 +12,50 @@ from utils.data_loader import build_sidebar
 # ── 共享侧边栏（含工厂筛选、日期筛选、数据管理） ──
 df = build_sidebar()
 
+
 selected_factory = st.session_state.get("selected_factory", "")
 is_all = st.session_state.get("is_all_factories", False)
 title = f"📊 TQC3 vs WIP8 产出对比 - {'全部工厂' if is_all else selected_factory}"
 st.title(title)
+
+cache_key = "all" if is_all else selected_factory
+
+df["diff"] = df["wip8_outputs"] - df["tqc3_pass_qty"]
+df["diff_pct"] = np.where(
+    df["tqc3_pass_qty"] != 0,
+    (df["wip8_outputs"] - df["tqc3_pass_qty"]) / df["tqc3_pass_qty"] * 100, 0,
+)
+
+@st.cache_data(show_spinner=False)
+def _compute_daily_agg(_df, _key: str):
+    """Cache daily aggregation by factory"""
+    return _df.groupby(_df["date"]).agg(
+        wip8_outputs=("wip8_outputs", "sum"),
+        tqc3_pass_qty=("tqc3_pass_qty", "sum"),
+    ).reset_index()
+
+@st.cache_data(show_spinner=False)
+def _compute_po_agg(_df, _key: str):
+    """Cache PO-level aggregation"""
+    return _df.groupby(["po_number", "style_number", "factory_name"]).agg(
+        wip8_outputs=("wip8_outputs", "sum"),
+        tqc3_pass_qty=("tqc3_pass_qty", "sum"),
+        date_count=("date", "nunique"),
+    ).reset_index()
+
+@st.cache_data(show_spinner=False)
+def _compute_style_agg(_df, _key: str):
+    """Cache Style-level aggregation"""
+    return _df.groupby(["style_number", "factory_name"]).agg(
+        wip8_outputs=("wip8_outputs", "sum"),
+        tqc3_pass_qty=("tqc3_pass_qty", "sum"),
+        po_count=("po_number", "nunique"),
+    ).reset_index()
+
+# Pre-compute all aggregations
+daily_agg = _compute_daily_agg(df, cache_key)
+po_agg = _compute_po_agg(df, cache_key)
+style_agg = _compute_style_agg(df, cache_key)
 
 st.markdown(
     """对比分析 **TQC3 Pass Qty** 与 **WIP8 Outputs** 的差异。
@@ -74,10 +114,6 @@ agg_level = st.radio(
 )
 
 if agg_level == "工厂总览 (Daily)":
-    daily_agg = df.groupby(df["date"]).agg(
-        wip8_outputs=("wip8_outputs", "sum"),
-        tqc3_pass_qty=("tqc3_pass_qty", "sum"),
-    ).reset_index()
     daily_agg["diff"] = daily_agg["wip8_outputs"] - daily_agg["tqc3_pass_qty"]
 
     fig = go.Figure()
@@ -113,11 +149,6 @@ if agg_level == "工厂总览 (Daily)":
             )
 
 elif agg_level == "PO 级别":
-    po_agg = df.groupby(["po_number", "style_number", "factory_name"]).agg(
-        wip8_outputs=("wip8_outputs", "sum"),
-        tqc3_pass_qty=("tqc3_pass_qty", "sum"),
-        date_count=("date", "nunique"),
-    ).reset_index()
     po_agg["diff"] = po_agg["wip8_outputs"] - po_agg["tqc3_pass_qty"]
     po_agg["diff_pct"] = np.where(
         po_agg["tqc3_pass_qty"] != 0,
@@ -151,11 +182,6 @@ elif agg_level == "PO 级别":
     )
 
 else:  # Style 级别
-    style_agg = df.groupby(["style_number", "factory_name"]).agg(
-        wip8_outputs=("wip8_outputs", "sum"),
-        tqc3_pass_qty=("tqc3_pass_qty", "sum"),
-        po_count=("po_number", "nunique"),
-    ).reset_index()
     style_agg["diff"] = style_agg["wip8_outputs"] - style_agg["tqc3_pass_qty"]
     style_agg["diff_pct"] = np.where(
         style_agg["tqc3_pass_qty"] != 0,

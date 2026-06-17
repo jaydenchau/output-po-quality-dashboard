@@ -12,10 +12,59 @@ from utils.data_loader import build_sidebar
 # ── 共享侧边栏（含工厂筛选、日期筛选、数据管理） ──
 df = build_sidebar()
 
+
 selected_factory = st.session_state.get("selected_factory", "")
 is_all = st.session_state.get("is_all_factories", False)
 title = f"📋 一致性检查 - {'全部工厂' if is_all else selected_factory}"
 st.title(title)
+
+cache_key = "all" if is_all else selected_factory
+
+@st.cache_data(show_spinner=False)
+def _compute_checks(_df, _key: str):
+    """Cache consistency checks by factory, only recompute on data/factory change"""
+    c = _df.copy()
+    c["check_wip8_tqc3"] = c["wip8_outputs"] == c["tqc3_pass_qty"]
+    c["check_wip8_inc"] = c["wip8_outputs"] == c["wip8_po_status_increase"]
+    c["check_fg10_nonneg"] = c["fg10_po_status_increase"] >= 0
+    c["all_pass"] = c["check_wip8_tqc3"] & c["check_wip8_inc"] & c["check_fg10_nonneg"]
+    # Daily stats for trend chart
+    daily = c.groupby(c["date"]).agg(
+        总记录=("all_pass", "count"),
+        异常数=("all_pass", lambda x: (~x).sum())
+    ).reset_index()
+    daily["通过率"] = (daily["总记录"] - daily["异常数"]) / daily["总记录"] * 100
+    return c, daily
+
+@st.cache_data(show_spinner=False)
+def _compute_neg_increment(_df, _key: str):
+    """Cache negative increment analysis"""
+    neg = _df[_df["wip8_po_status_increase"] < 0].copy()
+    daily_neg = _df.groupby(_df["date"])["wip8_po_status_increase"].apply(
+        lambda x: (x < 0).sum()).reset_index(name="负增量数")
+    return neg, daily_neg
+
+@st.cache_data(show_spinner=False)
+def _compute_po_completion(_df, _key: str):
+    """Cache PO completion analysis"""
+    g = (
+        _df.groupby(["po_number", "style_number", "color_code", "ship_id", "factory_name"], as_index=False)
+        .agg(
+            total_wip8_output=("wip8_outputs", "sum"),
+            po_quantity=("po_quantity", "first"),
+            date_count=("date", "nunique"),
+        )
+    )
+    g["completion_rate"] = g["total_wip8_output"] / g["po_quantity"] * 100
+    g["over_quota"] = g["completion_rate"] > 105
+    g["far_below"] = (g["total_wip8_output"] > 0) & (g["completion_rate"] < 30)
+    g["zero_progress"] = g["total_wip8_output"] == 0
+    return g
+
+# Compute (or get from cache)
+df_c, daily_stats = _compute_checks(df, cache_key)
+neg_df_full, neg_daily = _compute_neg_increment(df, cache_key)
+po_grouped = _compute_po_completion(df, cache_key)
 
 
 # ── 辅助函数：表格搜索筛选 ──
@@ -60,12 +109,6 @@ with tab1:
         """
     )
 
-    df_c = df.copy()
-    df_c["check_wip8_tqc3"] = df_c["wip8_outputs"] == df_c["tqc3_pass_qty"]
-    df_c["check_wip8_inc"] = df_c["wip8_outputs"] == df_c["wip8_po_status_increase"]
-    df_c["check_fg10_nonneg"] = df_c["fg10_po_status_increase"] >= 0
-    df_c["all_pass"] = df_c["check_wip8_tqc3"] & df_c["check_wip8_inc"] & df_c["check_fg10_nonneg"]
-
     total = len(df_c)
     pass_all = df_c["all_pass"].sum()
     fail_count = total - pass_all
@@ -89,10 +132,7 @@ with tab1:
 
     # 每日趋势
     st.markdown("### 每日异常数量趋势")
-    daily_stats = df_c.groupby(df_c["date"]).agg(
-        总记录=("all_pass", "count"), 异常数=("all_pass", lambda x: (~x).sum())
-    ).reset_index()
-    daily_stats["通过率"] = (daily_stats["总记录"] - daily_stats["异常数"]) / daily_stats["总记录"] * 100
+
 
     fig = go.Figure()
     fig.add_trace(go.Bar(x=daily_stats["date"], y=daily_stats["异常数"], name="异常数", marker_color="#e74c3c", opacity=0.7))
@@ -132,7 +172,6 @@ with tab2:
     - 负值意味着 PO 状态倒退，属于数据异常
     """)
 
-    neg_df_full = df[df["wip8_po_status_increase"] < 0].copy()
     total_all = len(df)
     neg_count = len(neg_df_full)
 
@@ -151,8 +190,7 @@ with tab2:
         st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("### 每日负增量数量趋势")
-        neg_daily = df.groupby(df["date"])["wip8_po_status_increase"].apply(
-            lambda x: (x < 0).sum()).reset_index(name="负增量数")
+        pass  # already computed in cache
         fig2 = px.bar(neg_daily, x="date", y="负增量数", color="负增量数", color_continuous_scale="Reds")
         fig2.update_layout(height=350)
         st.plotly_chart(fig2, use_container_width=True)
@@ -182,19 +220,7 @@ with tab3:
         """
     )
 
-    grouped = (
-        df.groupby(["po_number", "style_number", "color_code", "ship_id", "factory_name"], as_index=False)
-        .agg(
-            total_wip8_output=("wip8_outputs", "sum"),
-            po_quantity=("po_quantity", "first"),
-            date_count=("date", "nunique"),
-        )
-    )
-    grouped["completion_rate"] = grouped["total_wip8_output"] / grouped["po_quantity"] * 100
-    grouped["over_quota"] = grouped["completion_rate"] > 105
-    grouped["far_below"] = (grouped["total_wip8_output"] > 0) & (grouped["completion_rate"] < 30)
-    grouped["zero_progress"] = grouped["total_wip8_output"] == 0
-
+    grouped = po_grouped
     total_orders = len(grouped)
     over_count = grouped["over_quota"].sum()
     below_count = grouped["far_below"].sum()
