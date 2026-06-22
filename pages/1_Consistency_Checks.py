@@ -18,7 +18,8 @@ is_all = st.session_state.get("is_all_factories", False)
 title = f"📋 一致性检查 - {'全部工厂' if is_all else selected_factory}"
 st.title(title)
 
-cache_key = "all" if is_all else selected_factory
+df_version = st.session_state.get("df_version", 0)
+cache_key = f"{df_version}_{'all' if is_all else selected_factory}"
 
 @st.cache_data(show_spinner=False)
 def _compute_checks(_df, _key: str):
