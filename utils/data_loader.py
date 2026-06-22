@@ -9,12 +9,13 @@ from pathlib import Path
 from datetime import datetime
 
 UPLOAD_DIR = Path(__file__).parent.parent / "data"
-UPLOAD_PATH = UPLOAD_DIR / "uploaded_data.json"
+UPLOAD_PATH = UPLOAD_DIR / "uploaded_data.parquet"
+_LEGACY_UPLOAD_PATH = UPLOAD_DIR / "uploaded_data.json"  # 兼容旧版
 SAMPLE_PATH = UPLOAD_DIR / "sample_data.json"
 
 
 def get_data_source() -> str:
-    if UPLOAD_PATH.exists():
+    if UPLOAD_PATH.exists() or _LEGACY_UPLOAD_PATH.exists():
         return "uploaded"
     return "sample"
 
@@ -22,6 +23,8 @@ def get_data_source() -> str:
 def get_data_path() -> str:
     if UPLOAD_PATH.exists():
         return str(UPLOAD_PATH)
+    if _LEGACY_UPLOAD_PATH.exists():
+        return str(_LEGACY_UPLOAD_PATH)
     return str(SAMPLE_PATH)
 
 
@@ -45,11 +48,18 @@ def _read_data_from_bytes(uploaded_file) -> pd.DataFrame:
 def clear_uploaded_data():
     if UPLOAD_PATH.exists():
         UPLOAD_PATH.unlink()
+    if _LEGACY_UPLOAD_PATH.exists():
+        _LEGACY_UPLOAD_PATH.unlink()
 
 
 def _read_data(path: str) -> pd.DataFrame:
-    """读取数据文件（支持 .csv / .json），做类型转换"""
-    if path.endswith(".json"):
+    """读取数据文件（支持 .parquet / .csv / .json），做类型转换"""
+    if path.endswith(".parquet"):
+        df = pd.read_parquet(path)
+        if "date" in df.columns and not pd.api.types.is_datetime64_any_dtype(df["date"]):
+            df["date"] = pd.to_datetime(df["date"])
+        return df
+    elif path.endswith(".json"):
         df = pd.read_json(path, orient="records", convert_dates=["date"])
     else:
         df = pd.read_csv(path, parse_dates=["date"], low_memory=False)
@@ -59,9 +69,9 @@ def _read_data(path: str) -> pd.DataFrame:
         "wip8_po_statu_completion_quantity", "fg10_po_statu_completion_quantity",
         "fg14_po_statu_completion_quantity"
     ]
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+    cols = [c for c in numeric_cols if c in df.columns]
+    if cols:
+        df[cols] = df[cols].apply(pd.to_numeric, errors="coerce").fillna(0).astype("int32")
     return df
 
 
@@ -148,7 +158,7 @@ def build_sidebar() -> pd.DataFrame:
     data_src = get_data_source()
     if data_src == "uploaded":
         st.sidebar.success("✅ 当前：**上次上传的 CSV**")
-        mtime = datetime.fromtimestamp(Path(UPLOAD_PATH).stat().st_mtime)
+        mtime = datetime.fromtimestamp(Path(get_data_path()).stat().st_mtime)
         st.sidebar.caption(f"上传时间：{mtime.strftime('%Y-%m-%d %H:%M')}")
     else:
         st.sidebar.info("📄 当前：**样本数据**")
@@ -159,12 +169,25 @@ def build_sidebar() -> pd.DataFrame:
     )
     if uploaded_file is not None:
         with st.spinner("正在保存并加载数据..."):
-            # 保存为 JSON 以便统一读取
+            # 读取 + 类型转换
             temp_df = _read_data_from_bytes(uploaded_file)
-            temp_df.to_json(str(UPLOAD_PATH), orient="records", date_format="iso", force_ascii=False)
-            if "df_path" in st.session_state:
-                del st.session_state["df_path"]
-            st.cache_data.clear()
+            cols = [c for c in [
+                "po_quantity", "wip8_outputs", "tqc3_pass_qty",
+                "wip8_po_status_increase", "fg10_po_status_increase", "fg14_po_status_increase",
+                "wip8_po_statu_completion_quantity", "fg10_po_statu_completion_quantity",
+                "fg14_po_statu_completion_quantity",
+            ] if c in temp_df.columns]
+            if cols:
+                temp_df[cols] = temp_df[cols].apply(pd.to_numeric, errors="coerce").fillna(0).astype("int32")
+            # 后台写 Parquet（下次启动直接读），不阻塞当前渲染
+            UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            temp_df.to_parquet(str(UPLOAD_PATH), index=False)
+            if _LEGACY_UPLOAD_PATH.exists():
+                _LEGACY_UPLOAD_PATH.unlink()
+            # 直接把已处理的 df 放入 session_state，跳过二次读取
+            st.session_state["df_raw"] = temp_df
+            st.session_state["df_path"] = str(UPLOAD_PATH)
+            st.session_state["df_version"] = st.session_state.get("df_version", 0) + 1
             st.rerun()
 
     if data_src == "uploaded":
@@ -183,7 +206,7 @@ def build_sidebar() -> pd.DataFrame:
 
     # ── 应用筛选 ──
     is_all = (selected_factory == "🏭 全部工厂")
-    filtered = df.copy() if is_all else df[df["factory_name"] == selected_factory].copy()
+    filtered = df if is_all else df[df["factory_name"] == selected_factory]
 
     if isinstance(date_range, tuple) and len(date_range) == 2:
         start_date, end_date = date_range
