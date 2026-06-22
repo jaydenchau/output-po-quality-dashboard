@@ -8,7 +8,7 @@ dist/
 build/
 
 # Uploaded data (user-specific)
-data/uploaded_data.csv
+data/uploaded_data.*
 
 # IDE
 .vscode/

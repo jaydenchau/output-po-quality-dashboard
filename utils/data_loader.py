@@ -9,8 +9,8 @@ from pathlib import Path
 from datetime import datetime
 
 UPLOAD_DIR = Path(__file__).parent.parent / "data"
-UPLOAD_PATH = UPLOAD_DIR / "uploaded_data.csv"
-SAMPLE_PATH = UPLOAD_DIR / "sample_data.csv"
+UPLOAD_PATH = UPLOAD_DIR / "uploaded_data.json"
+SAMPLE_PATH = UPLOAD_DIR / "sample_data.json"
 
 
 def get_data_source() -> str:
@@ -32,14 +32,27 @@ def save_uploaded_file(uploaded_file) -> str:
     return str(UPLOAD_PATH)
 
 
+
+
+def _read_data_from_bytes(uploaded_file) -> pd.DataFrame:
+    """从上传的文件读取（CSV 或 JSON）"""
+    import io
+    content = uploaded_file.getvalue()
+    if uploaded_file.name.endswith(".json"):
+        return pd.read_json(io.BytesIO(content), orient="records", convert_dates=["date"])
+    else:
+        return pd.read_csv(io.BytesIO(content), parse_dates=["date"], low_memory=False)
 def clear_uploaded_data():
     if UPLOAD_PATH.exists():
         UPLOAD_PATH.unlink()
 
 
-def _read_csv(csv_path: str) -> pd.DataFrame:
-    """读取 CSV 并做类型转换"""
-    df = pd.read_csv(csv_path, parse_dates=["date"], low_memory=False)
+def _read_data(path: str) -> pd.DataFrame:
+    """读取数据文件（支持 .csv / .json），做类型转换"""
+    if path.endswith(".json"):
+        df = pd.read_json(path, orient="records", convert_dates=["date"])
+    else:
+        df = pd.read_csv(path, parse_dates=["date"], low_memory=False)
     numeric_cols = [
         "po_quantity", "wip8_outputs", "tqc3_pass_qty",
         "wip8_po_status_increase", "fg10_po_status_increase", "fg14_po_status_increase",
@@ -74,7 +87,7 @@ def load_data() -> pd.DataFrame:
         return st.session_state["df_raw"]
 
     with st.spinner("正在加载数据..."):
-        df = _read_csv(current_path)
+        df = _read_data(current_path)
 
     st.session_state["df_raw"] = df
     st.session_state["df_path"] = current_path
@@ -141,12 +154,14 @@ def build_sidebar() -> pd.DataFrame:
         st.sidebar.info("📄 当前：**样本数据**")
 
     uploaded_file = st.sidebar.file_uploader(
-        "上传 CSV 替换数据", type=["csv"],
-        help="上传后自动保存，下次打开自动加载。",
+        "上传 CSV/JSON 替换数据", type=["csv", "json"],
+        help="上传后自动保存为 JSON，下次打开自动加载。",
     )
     if uploaded_file is not None:
         with st.spinner("正在保存并加载数据..."):
-            save_uploaded_file(uploaded_file)
+            # 保存为 JSON 以便统一读取
+            temp_df = _read_data_from_bytes(uploaded_file)
+            temp_df.to_json(str(UPLOAD_PATH), orient="records", date_format="iso", force_ascii=False)
             if "df_path" in st.session_state:
                 del st.session_state["df_path"]
             st.cache_data.clear()

@@ -168,6 +168,8 @@ if __name__ == "__main__":
     df = generate_sample_data()
     output_path = "data/sample_data.csv"
     df.to_csv(output_path, index=False, date_format="%Y-%m-%d")
+    json_path = output_path.replace(".csv", ".json")
+    df.to_json(json_path, orient="records", date_format="iso", force_ascii=False)
     print(f"生成 {len(df)} 行数据到 {output_path}")
     print(f"日期范围: {df['date'].min().date()} ~ {df['date'].max().date()}")
     print(f"工厂: {list(df['factory_name'].unique())}")
