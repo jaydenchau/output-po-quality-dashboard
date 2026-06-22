@@ -52,27 +52,40 @@ def clear_uploaded_data():
         _LEGACY_UPLOAD_PATH.unlink()
 
 
+_NUMERIC_COLS = [
+    "po_quantity", "wip8_outputs", "tqc3_pass_qty",
+    "wip8_po_status_increase", "fg10_po_status_increase", "fg14_po_status_increase",
+    "wip8_po_statu_completion_quantity", "fg10_po_statu_completion_quantity",
+    "fg14_po_statu_completion_quantity",
+]
+
+
+def _finalize_df(df: pd.DataFrame) -> pd.DataFrame:
+    """类型转换 + 预计算派生列（读取和上传时共用）"""
+    cols = [c for c in _NUMERIC_COLS if c in df.columns]
+    if cols:
+        df[cols] = df[cols].apply(pd.to_numeric, errors="coerce").fillna(0).astype("int32")
+    if "wip8_outputs" in df.columns and "tqc3_pass_qty" in df.columns:
+        df["diff"] = df["wip8_outputs"] - df["tqc3_pass_qty"]
+        df["diff_pct"] = (
+            (df["wip8_outputs"] - df["tqc3_pass_qty"])
+            / df["tqc3_pass_qty"].replace(0, float("nan"))
+            * 100
+        ).fillna(0).astype("float32")
+    return df
+
+
 def _read_data(path: str) -> pd.DataFrame:
     """读取数据文件（支持 .parquet / .csv / .json），做类型转换"""
     if path.endswith(".parquet"):
         df = pd.read_parquet(path)
         if "date" in df.columns and not pd.api.types.is_datetime64_any_dtype(df["date"]):
             df["date"] = pd.to_datetime(df["date"])
-        return df
     elif path.endswith(".json"):
         df = pd.read_json(path, orient="records", convert_dates=["date"])
     else:
         df = pd.read_csv(path, parse_dates=["date"], low_memory=False)
-    numeric_cols = [
-        "po_quantity", "wip8_outputs", "tqc3_pass_qty",
-        "wip8_po_status_increase", "fg10_po_status_increase", "fg14_po_status_increase",
-        "wip8_po_statu_completion_quantity", "fg10_po_statu_completion_quantity",
-        "fg14_po_statu_completion_quantity"
-    ]
-    cols = [c for c in numeric_cols if c in df.columns]
-    if cols:
-        df[cols] = df[cols].apply(pd.to_numeric, errors="coerce").fillna(0).astype("int32")
-    return df
+    return _finalize_df(df)
 
 
 def load_data() -> pd.DataFrame:
@@ -169,17 +182,9 @@ def build_sidebar() -> pd.DataFrame:
     )
     if uploaded_file is not None:
         with st.spinner("正在保存并加载数据..."):
-            # 读取 + 类型转换
-            temp_df = _read_data_from_bytes(uploaded_file)
-            cols = [c for c in [
-                "po_quantity", "wip8_outputs", "tqc3_pass_qty",
-                "wip8_po_status_increase", "fg10_po_status_increase", "fg14_po_status_increase",
-                "wip8_po_statu_completion_quantity", "fg10_po_statu_completion_quantity",
-                "fg14_po_statu_completion_quantity",
-            ] if c in temp_df.columns]
-            if cols:
-                temp_df[cols] = temp_df[cols].apply(pd.to_numeric, errors="coerce").fillna(0).astype("int32")
-            # 后台写 Parquet（下次启动直接读），不阻塞当前渲染
+            # 读取 + 类型转换 + 派生列
+            temp_df = _finalize_df(_read_data_from_bytes(uploaded_file))
+            # 后台写 Parquet（下次启动直接读）
             UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
             temp_df.to_parquet(str(UPLOAD_PATH), index=False)
             if _LEGACY_UPLOAD_PATH.exists():

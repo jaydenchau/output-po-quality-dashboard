@@ -19,12 +19,14 @@ title = f"📋 一致性检查 - {'全部工厂' if is_all else selected_factory
 st.title(title)
 
 df_version = st.session_state.get("df_version", 0)
-cache_key = f"{df_version}_{'all' if is_all else selected_factory}"
+date_range = st.session_state.get("date_range", None)
+date_key = f"{date_range[0]}_{date_range[1]}" if isinstance(date_range, tuple) and len(date_range) == 2 else "all"
+cache_key = f"{df_version}_{date_key}_{'all' if is_all else selected_factory}"
 
 @st.cache_data(show_spinner=False)
-def _compute_checks(_df, _key: str):
+def _compute_checks(df_input, key: str):
     """Cache consistency checks by factory, only recompute on data/factory change"""
-    c = _df.copy()
+    c = df_input.copy()
     c["check_wip8_tqc3"] = c["wip8_outputs"] == c["tqc3_pass_qty"]
     c["check_wip8_inc"] = c["wip8_outputs"] == c["wip8_po_status_increase"]
     c["check_fg10_nonneg"] = c["fg10_po_status_increase"] >= 0
@@ -38,18 +40,18 @@ def _compute_checks(_df, _key: str):
     return c, daily
 
 @st.cache_data(show_spinner=False)
-def _compute_neg_increment(_df, _key: str):
+def _compute_neg_increment(df_input, key: str):
     """Cache negative increment analysis"""
-    neg = _df[_df["wip8_po_status_increase"] < 0].copy()
-    daily_neg = _df.groupby(_df["date"])["wip8_po_status_increase"].apply(
+    neg = df_input[df_input["wip8_po_status_increase"] < 0].copy()
+    daily_neg = df_input.groupby(df_input["date"])["wip8_po_status_increase"].apply(
         lambda x: (x < 0).sum()).reset_index(name="负增量数")
     return neg, daily_neg
 
 @st.cache_data(show_spinner=False)
-def _compute_po_completion(_df, _key: str):
+def _compute_po_completion(df_input, key: str):
     """Cache PO completion analysis"""
     g = (
-        _df.groupby(["po_number", "style_number", "color_code", "ship_id", "factory_name"], as_index=False)
+        df_input.groupby(["po_number", "style_number", "color_code", "ship_id", "factory_name"], as_index=False)
         .agg(
             total_wip8_output=("wip8_outputs", "sum"),
             po_quantity=("po_quantity", "first"),

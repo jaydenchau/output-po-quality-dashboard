@@ -19,35 +19,31 @@ title = f"📊 TQC3 vs WIP8 产出对比 - {'全部工厂' if is_all else select
 st.title(title)
 
 df_version = st.session_state.get("df_version", 0)
-cache_key = f"{df_version}_{'all' if is_all else selected_factory}"
-
-df["diff"] = df["wip8_outputs"] - df["tqc3_pass_qty"]
-df["diff_pct"] = np.where(
-    df["tqc3_pass_qty"] != 0,
-    (df["wip8_outputs"] - df["tqc3_pass_qty"]) / df["tqc3_pass_qty"] * 100, 0,
-)
+date_range = st.session_state.get("date_range", None)
+date_key = f"{date_range[0]}_{date_range[1]}" if isinstance(date_range, tuple) and len(date_range) == 2 else "all"
+cache_key = f"{df_version}_{date_key}_{'all' if is_all else selected_factory}"
 
 @st.cache_data(show_spinner=False)
-def _compute_daily_agg(_df, _key: str):
+def _compute_daily_agg(df_input, key: str):
     """Cache daily aggregation by factory"""
-    return _df.groupby(_df["date"]).agg(
+    return df_input.groupby(df_input["date"]).agg(
         wip8_outputs=("wip8_outputs", "sum"),
         tqc3_pass_qty=("tqc3_pass_qty", "sum"),
     ).reset_index()
 
 @st.cache_data(show_spinner=False)
-def _compute_po_agg(_df, _key: str):
+def _compute_po_agg(df_input, key: str):
     """Cache PO-level aggregation"""
-    return _df.groupby(["po_number", "style_number", "factory_name"]).agg(
+    return df_input.groupby(["po_number", "style_number", "factory_name"]).agg(
         wip8_outputs=("wip8_outputs", "sum"),
         tqc3_pass_qty=("tqc3_pass_qty", "sum"),
         date_count=("date", "nunique"),
     ).reset_index()
 
 @st.cache_data(show_spinner=False)
-def _compute_style_agg(_df, _key: str):
+def _compute_style_agg(df_input, key: str):
     """Cache Style-level aggregation"""
-    return _df.groupby(["style_number", "factory_name"]).agg(
+    return df_input.groupby(["style_number", "factory_name"]).agg(
         wip8_outputs=("wip8_outputs", "sum"),
         tqc3_pass_qty=("tqc3_pass_qty", "sum"),
         po_count=("po_number", "nunique"),
@@ -64,12 +60,6 @@ st.markdown(
 )
 
 # ── 全局指标 ──
-df["diff"] = df["wip8_outputs"] - df["tqc3_pass_qty"]
-df["diff_pct"] = np.where(
-    df["tqc3_pass_qty"] != 0,
-    (df["wip8_outputs"] - df["tqc3_pass_qty"]) / df["tqc3_pass_qty"] * 100, 0,
-)
-
 total_records = len(df)
 match_count = (df["wip8_outputs"] == df["tqc3_pass_qty"]).sum()
 match_rate = match_count / total_records * 100 if total_records > 0 else 0
